@@ -1,5 +1,6 @@
 import unittest
 
+import networkx as nx
 import numpy as np
 import numpy.testing as np_test
 import pandas as pd
@@ -1238,6 +1239,43 @@ class TestDoQuery(unittest.TestCase):
         result = CausalInference(model).query(["W"], do={"S": 0}, show_progress=False)
         expected = VariableElimination(model.do(["S"])).query(["W"], evidence={"S": 0}, show_progress=False)
         np_test.assert_array_almost_equal(result.values, expected.values)
+
+    def test_random_queries_match_mutilated_network(self):
+        # Random 5-node DAGs, 1-2 do targets, random evidence (including descendants of the
+        # do targets); every query must match inference on the mutilated network.
+        rng = np.random.default_rng(0)
+        nodes = [f"V{i}" for i in range(5)]
+        n_checked = 0
+        while n_checked < 100:
+            edges = [(u, v) for i, u in enumerate(nodes) for v in nodes[i + 1 :] if rng.random() < 0.45]
+            model = DiscreteBayesianNetwork(edges)
+            model.add_nodes_from(nodes)
+            for node in nodes:
+                parents = sorted(model.get_parents(node))
+                model.add_cpds(
+                    TabularCPD(
+                        node,
+                        2,
+                        rng.dirichlet([1, 1], size=2 ** len(parents)).T,
+                        evidence=parents or None,
+                        evidence_card=[2] * len(parents) or None,
+                    )
+                )
+
+            order = [str(node) for node in rng.permutation(nodes)]
+            n_do = int(rng.integers(1, 3))
+            do_vars, query_var, others = order[:n_do], order[-1], order[n_do:-1]
+            if not set(do_vars).isdisjoint(nx.descendants(model, query_var)):
+                continue
+            do = {var: int(rng.integers(2)) for var in do_vars}
+            evidence = {var: int(rng.integers(2)) for var in others if rng.random() < 0.5}
+
+            result = CausalInference(model).query([query_var], do=do, evidence=evidence, show_progress=False)
+            expected = VariableElimination(model.do(do_vars)).query(
+                [query_var], evidence={**evidence, **do}, show_progress=False
+            )
+            np_test.assert_array_almost_equal(result.values, expected.values, err_msg=f"{edges=} {do=} {evidence=}")
+            n_checked += 1
 
 
 class TestEstimator(unittest.TestCase):
