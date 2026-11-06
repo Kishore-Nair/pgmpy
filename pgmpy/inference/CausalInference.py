@@ -969,8 +969,9 @@ class CausalInference:
             do(Y), Z)`.
 
         adjustment_set: str or list (default=None)
-            Specifies the adjustment set to use. If None, uses the parents of the
-            do variables as the adjustment set.
+            Specifies the adjustment set to use. If None, the query is computed
+            exactly by inference on the mutilated network, ``model.do(do.keys())``,
+            with the intervened values as evidence.
 
         inference_algo: str or pgmpy.inference.Inference instance
             The inference algorithm to use to compute the probability values.
@@ -1044,6 +1045,10 @@ class CausalInference:
             adjustment_set = self.model.get_parents(do_vars) - set(do_vars)
             if len(adjustment_set.intersection(self.model.latents)) != 0:
                 raise ValueError("Not all parents of do variables are observed. Please specify an adjustment set.")
+            if do:
+                return inference_algo(self.model.do(do_vars)).query(
+                    variables, evidence={**evidence, **do}, show_progress=False
+                )
 
         infer = inference_algo(self.model)
 
